@@ -18,7 +18,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && rm -rf /var/lib/apt/lists/*
 
 COPY . /usr/src/app
-RUN mv /usr/src/app/node_modules_bak /usr/src/app/node_modules
+RUN mv /usr/src/app/node_modules_bak.zip /usr/src/app
+RUN unzip /usr/src/app/node_modules_bak.zip -d /usr/src/app/node_modules
 ENV NODE_ENV="production"
 
 RUN cd /usr/src/app && npm --registry https://registry.npm.taobao.org install --production
