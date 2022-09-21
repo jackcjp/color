@@ -13,6 +13,9 @@ const tileSize = 256,
     pitch = 0,
     ratio = 1;
 let topRightCorner = [-90.0, -180.0];
+let sourceZoom = 2;
+let targetZoom = 10;  // E.g. Here cut level 10 tiles by level 2 grid
+let bount = undefined;
 
 mbgl.on('message', function(err) {
     if (err.severity === 'WARNING' || err.severity === 'ERROR') {
@@ -29,7 +32,7 @@ let changeColorAndFormat = function(zoom, x, y, lon, lat, tileData) {
             },
             ratio
         };
-        // console.log('options',options);
+        // console.log('options', options);
         const map = new mbgl.Map(options);
         map.load(require('./style/fixtures/style.json'));
 
@@ -72,17 +75,17 @@ let connectDb = function(dbPath) {
     return betterSqlite(dbPath, /*{ verbose: console.log }*/);
 }
 let createDb = function(inputPath, outputPath) {
-    let db = connectDb(outputPath);
-    db.prepare('CREATE TABLE metadata (name text, value text)').run();
-    db.prepare(`ATTACH '${inputPath}' AS A;`).run();
-    db.prepare(`INSERT INTO metadata (name, value) SELECT name, value FROM A.metadata;`).run();
-    db.prepare(`UPDATE metadata SET value = 'webp' WHERE name = 'format';`).run();
-    db.prepare('CREATE TABLE tiles (zoom_level integer NOT NULL, tile_column integer NOT NULL, tile_row integer NOT NULL, tile_data blob)').run();
+    const outputDb = connectDb(outputPath);
+    outputDb.prepare('CREATE TABLE IF NOT EXISTS metadata (name text, value text)').run();
+    outputDb.prepare(`ATTACH '${inputPath}' AS A;`).run();
+    outputDb.prepare(`INSERT INTO metadata (name, value) SELECT name, value FROM A.metadata;`).run();
+    outputDb.prepare(`UPDATE metadata SET value = 'webp' WHERE name = 'format';`).run();
+    outputDb.prepare('CREATE TABLE IF NOT EXISTS tiles (zoom_level integer NOT NULL, tile_column integer NOT NULL, tile_row integer NOT NULL, tile_data blob)').run();
     return betterSqlite(outputPath, /*{ verbose: console.log }*/);
 }
 let createIndex = function(outputPath) {
-    let db = connectDb(outputPath);
-    db.prepare('CREATE UNIQUE INDEX tile_index ON tiles ( "zoom_level" ASC,"tile_column" ASC, "tile_row" ASC);').run();
+    const outputDb = connectDb(outputPath);
+    outputDb.prepare('CREATE UNIQUE INDEX IF NOT EXISTS tile_index ON tiles ( "zoom_level" ASC,"tile_column" ASC, "tile_row" ASC);').run();
 }
 
 const scaleDenominator_dic = {
@@ -144,6 +147,29 @@ let calCenter = function(z, x, y) {
     return truncate_lnglat.apply(null, center);
 }
 
+let  getBound = function(x, y, targetZoom, sourceZoom, args) {
+    // console.log(x, y);
+    targetZoom = Number.parseInt(targetZoom);
+    sourceZoom = Number.parseInt(sourceZoom);
+    const minX = x * Math.pow(2, targetZoom - sourceZoom);
+    const maxX = minX + Math.pow(2, targetZoom - sourceZoom) - 1;
+    const minY = y * Math.pow(2, targetZoom - sourceZoom);
+    const maxY = minY + Math.pow(2, targetZoom - sourceZoom) - 1;
+    return { minX, maxX, minY, maxY };
+}
+
+function isOverBound(inputpath, z, x, y, args) {
+    const [, boundX, boundY] = inputpath.split(/[\-\_]/).map(p => Number.parseInt(p))
+    // console.log('z', z, 'x', x, 'y', y , 'boundX', boundX, 'boundY', boundY);
+    bound = bount ? bount : getBound(boundX, boundY, targetZoom, sourceZoom, args);
+    const inBound = z == targetZoom && x >=  bound.minX && x <= bound.maxX && y <= bound.maxY && y >= bound.minY;
+    const isOverBound = z !== targetZoom || x < bound.minX || x > bound.maxX || y > bound.maxY || y < bound.minY;
+    // console.log('z', z, 'x', x, 'y', y, 'isOverBound', isOverBound);
+    if (!inBound !==isOverBound)
+        console.log('isOverBound _ || not equal to inBound, isOverBound', isOverBound, 'inBound', inBound);
+    return isOverBound
+}
+
 let readMbtiles = async function() {
     const args = process.argv.splice(2);
     console.log('args:', args);
@@ -156,41 +182,43 @@ let readMbtiles = async function() {
     if (fs.existsSync(outputPath)) {
         fs.unlinkSync(outputPath);
     }
-    let db = connectDb(inputpath);
-    let outputDb = createDb(inputpath, outputPath);
-    let startTime = Date.now();
-    let count = db.prepare(`SELECT count(*) from tiles;`).pluck().get();
-    let pageCount = Math.ceil(count/limit);
-    // let pageCount =1;
+    const inputDb = connectDb(inputpath);
+    const outputDb = createDb(inputpath, outputPath);
+    const startTime = Date.now();
+    const count = inputDb.prepare(`SELECT count(*) from tiles;`).pluck().get();
+    const pageCount = Math.ceil(count/limit);
     console.log('Total count', count, ', page count', pageCount, ', page limit', limit);
     let currCount = 0;
+    let overBoundCount = 0;
     for (let i = 0; i < pageCount; i++) {
-        let offset = i * limit;
-        let data = db.prepare(`SELECT * from tiles limit ${limit} offset ${offset};`).all();
-        // let data = db.prepare(`SELECT * from tiles where zoom_level in (0, 1, 2);`).all();
+        const offset = i * limit;
+        const data = inputDb.prepare(`SELECT * from tiles limit ${limit} offset ${offset};`).all();
         console.log('progress: ', offset, '-', offset + data.length);
-        currCount += data.length;
-        let insert = outputDb.prepare(`INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (@zoom_level, @tile_column, @tile_row, @tile_data);`);
         let res = [];
         for (let item of data) {
             let z = item.zoom_level, x = item.tile_column, y = item.tile_row, tile_data = item.tile_data;
+            if (isOverBound(inputpath, z, x, y)) {
+                overBoundCount++;
+                continue;
+            }
             const tileCenter = calCenter(z, x, y);
             // console.log('z',z,'x', x, 'y',y, 'topRightCorner',topRightCorner,'tileCenter', tileCenter);
             // console.log('z',z,'x', x, 'y',y, 'topRightCorner',topRightCorner,'tileCenter', tileCenter[0].toFixed(20), tileCenter[1].toFixed(20));
             item.tile_data = changeColorAndFormat(z, x, y, tileCenter[0].toFixed(20), tileCenter[1].toFixed(20), tile_data);
             res.push(item.tile_data);
         }
-        let readyData = await Promise.all(res);
-        // .then(async (newData) => {
-        let insertMany = db.transaction(async (ndata) => {
+        const insert = outputDb.prepare(`INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (@zoom_level, @tile_column, @tile_row, @tile_data);`);
+        const insertMany = outputDb.transaction(async (ndata) => {
             for (let item of ndata) {
                 insert.run(item);
+                currCount++
             }
         });
+        const readyData = await Promise.all(res);
         await insertMany(readyData);
-        console.log('Insert count', currCount);
-        // });
+        console.log('Insert count:', currCount, ', overBoundCount:', overBoundCount);
     }
+    console.log('Total count', count, ', insert count:', currCount, ', overBoundCount:', overBoundCount, 'insert count + overBoundCount: ', currCount + overBoundCount);
     console.log('Create index ...');
     createIndex(outputPath);
     console.log('Create index finished!');
@@ -204,4 +232,4 @@ readMbtiles()
 // EGL_LOG_LEVEL=debug
 // output: /input/db/path_webp.mbtiles located at the same path
 // xvfb-run -a -s '-screen 0 800x600x24' node server.js /input/db/path
-// e.g.: xvfb-run -a -s '-screen 0 800x600x24' node server.js ./test1_100_90_1.mbtiles
+// e.g.: xvfb-run -a -s '-screen 0 800x600x24' node server.js ./2-6-1.mbtiles
