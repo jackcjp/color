@@ -159,7 +159,7 @@ let  getBound = function(x, y, targetZoom, sourceZoom, args) {
 }
 
 function isOverBound(inputPath, z, x, y, args) {
-    const [, , boundX, boundY] = inputPath.split(/[\-\_]/).map(p => Number.parseInt(p))
+    const [boundX, boundY, targetZoom] = path.basename(inputPath, '.sqlite').split(/[\-\_]/).map(p => Number.parseInt(p)).filter(p => !Number.isNaN(p));
     // console.log('z', z, 'x', x, 'y', y , 'boundX', boundX, 'boundY', boundY);
     bound = bount ? bount : getBound(boundX, boundY, targetZoom, sourceZoom, args);
     const inBound = z == targetZoom && x >=  bound.minX && x <= bound.maxX && y <= bound.maxY && y >= bound.minY;
