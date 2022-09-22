@@ -174,7 +174,7 @@ let readMbtiles = async function() {
     const args = process.argv.splice(2);
     console.log('args:', args);
     inputPath = args[0];
-    outputPath = path.basename(inputPath, '.mbtiles') + '_webp' + '.mbtiles';
+    outputPath = path.basename(inputPath, '.sqlite') + '_webp' + '.mbtiles';
     console.log('outputPath:', outputPath)
     if (!fs.existsSync(inputPath)) {
         throw Error(`path ${inputPath} not existed!`, inputPath);
