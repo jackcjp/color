@@ -158,8 +158,8 @@ let  getBound = function(x, y, targetZoom, sourceZoom, args) {
     return { minX, maxX, minY, maxY };
 }
 
-function isOverBound(inputpath, z, x, y, args) {
-    const [, boundX, boundY] = inputpath.split(/[\-\_]/).map(p => Number.parseInt(p))
+function isOverBound(inputPath, z, x, y, args) {
+    const [, , boundX, boundY] = inputPath.split(/[\-\_]/).map(p => Number.parseInt(p))
     // console.log('z', z, 'x', x, 'y', y , 'boundX', boundX, 'boundY', boundY);
     bound = bount ? bount : getBound(boundX, boundY, targetZoom, sourceZoom, args);
     const inBound = z == targetZoom && x >=  bound.minX && x <= bound.maxX && y <= bound.maxY && y >= bound.minY;
@@ -173,17 +173,17 @@ function isOverBound(inputpath, z, x, y, args) {
 let readMbtiles = async function() {
     const args = process.argv.splice(2);
     console.log('args:', args);
-    inputpath = args[0];
-    outputPath = path.basename(inputpath, '.mbtiles') + '_webp' + '.mbtiles';
+    inputPath = args[0];
+    outputPath = path.basename(inputPath, '.mbtiles') + '_webp' + '.mbtiles';
     console.log('outputPath:', outputPath)
-    if (!fs.existsSync(inputpath)) {
-        throw Error(`path ${inputpath} not existed!`, inputpath);
+    if (!fs.existsSync(inputPath)) {
+        throw Error(`path ${inputPath} not existed!`, inputPath);
     }
     if (fs.existsSync(outputPath)) {
         fs.unlinkSync(outputPath);
     }
-    const inputDb = connectDb(inputpath);
-    const outputDb = createDb(inputpath, outputPath);
+    const inputDb = connectDb(inputPath);
+    const outputDb = createDb(inputPath, outputPath);
     const startTime = Date.now();
     const count = inputDb.prepare(`SELECT count(*) from tiles;`).pluck().get();
     const pageCount = Math.ceil(count/limit);
@@ -197,7 +197,7 @@ let readMbtiles = async function() {
         let res = [];
         for (let item of data) {
             let z = item.zoom_level, x = item.tile_column, y = item.tile_row, tile_data = item.tile_data;
-            if (isOverBound(inputpath, z, x, y)) {
+            if (isOverBound(inputPath, z, x, y)) {
                 overBoundCount++;
                 continue;
             }
