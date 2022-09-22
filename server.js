@@ -5,6 +5,7 @@ const betterSqlite = require('better-sqlite3');
 const mercator = new (require('@mapbox/sphericalmercator'))();
 const zlib = require('zlib');
 const path = require('path');
+const config = require('/data/config.json');
 
 const limit = 1000;
 const tileSize = 256,
@@ -74,12 +75,28 @@ let changeColorAndFormat = function(zoom, x, y, lon, lat, tileData) {
 let connectDb = function(dbPath) {
     return betterSqlite(dbPath, /*{ verbose: console.log }*/);
 }
-let createDb = function(inputPath, outputPath) {
+
+let parseMetadata = function(metadataPath) {
+    let mtPath = path.resolve(metadataPath, 'metadata.json');
+    const fileBuff = fs.readFileSync(mtPath);
+    let metadata = JSON.parse(fileBuff);
+    metadata.json = JSON.stringify(JSON.parse(metadata.json));
+    return Object.keys(metadata).map(key => {
+        return {'name': key, 'value': metadata[key]}
+    });
+}
+
+let createDb = async function(metadataPath, outputPath) {
     const outputDb = connectDb(outputPath);
     outputDb.prepare('CREATE TABLE IF NOT EXISTS metadata (name text, value text)').run();
-    outputDb.prepare(`ATTACH '${inputPath}' AS A;`).run();
-    outputDb.prepare(`INSERT INTO metadata (name, value) SELECT name, value FROM A.metadata;`).run();
-    outputDb.prepare(`UPDATE metadata SET value = 'webp' WHERE name = 'format';`).run();
+    const meta = parseMetadata(metadataPath);
+    let insert = outputDb.prepare(`INSERT INTO metadata (name, value) VALUES (@name, @value);`);
+    const insertMany = outputDb.transaction(async (mdata) => {
+        for (let item of mdata) {
+            insert.run(item);
+        }
+    });
+    await insertMany(meta);
     outputDb.prepare('CREATE TABLE IF NOT EXISTS tiles (zoom_level integer NOT NULL, tile_column integer NOT NULL, tile_row integer NOT NULL, tile_data blob)').run();
     return betterSqlite(outputPath, /*{ verbose: console.log }*/);
 }
@@ -160,7 +177,7 @@ let  getBound = function(x, y, targetZoom, sourceZoom, args) {
 
 function isOverBound(inputPath, z, x, y, args) {
     const [boundX, boundY, targetZoom] = path.basename(inputPath, '.sqlite').split(/[\-\_]/).map(p => Number.parseInt(p)).filter(p => !Number.isNaN(p));
-    // console.log('z', z, 'x', x, 'y', y , 'boundX', boundX, 'boundY', boundY);
+    // console.log('z', z, 'x', x, 'y', y , 'boundX', boundX, 'boundY', boundY, 'targetZoom, targetZoom);
     bound = bount ? bount : getBound(boundX, boundY, targetZoom, sourceZoom, args);
     const inBound = z == targetZoom && x >=  bound.minX && x <= bound.maxX && y <= bound.maxY && y >= bound.minY;
     const isOverBound = z !== targetZoom || x < bound.minX || x > bound.maxX || y > bound.maxY || y < bound.minY;
@@ -171,19 +188,21 @@ function isOverBound(inputPath, z, x, y, args) {
 }
 
 let readMbtiles = async function() {
-    const args = process.argv.splice(2);
+    const args = config; 
     console.log('args:', args);
-    inputPath = args[0];
-    outputPath = path.basename(inputPath, '.sqlite') + '_webp' + '.mbtiles';
-    console.log('outputPath:', outputPath)
-    if (!fs.existsSync(inputPath)) {
-        throw Error(`path ${inputPath} not existed!`, inputPath);
+    inputPath = args['inputPath'];
+    metadataPath = args['metadataPath'];
+    if (!fs.existsSync(inputPath) || !fs.existsSync(metadataPath)) {
+        let notExistsPath = !fs.existsSync(inputPath) ? inputPath : metadataPath
+        throw Error(`path ${notExistsPath} not existed!`, notExistsPath);
     }
+    outputPath = args['outputPath'] ? args['outputPath'] : path.basename(inputPath, '.sqlite') + '_webp' + '.mbtiles';
+    console.log('outputPath:', outputPath);
     if (fs.existsSync(outputPath)) {
         fs.unlinkSync(outputPath);
     }
     const inputDb = connectDb(inputPath);
-    const outputDb = createDb(inputPath, outputPath);
+    const outputDb = await createDb(metadataPath, outputPath);
     const startTime = Date.now();
     const count = inputDb.prepare(`SELECT count(*) from tiles;`).pluck().get();
     const pageCount = Math.ceil(count/limit);

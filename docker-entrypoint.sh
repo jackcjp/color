@@ -20,7 +20,7 @@ trap refresh HUP
 
 if ! which -- "${1}"; then
   # first arg is not an executable
-  xvfb-run -a --server-args="-screen 0 1024x768x24" -- node /app/server.js /data/2-6-1.mbtiles "$@" &
+  xvfb-run -a --server-args="-screen 0 1024x768x24" -- node /app/server.js "$@" &
 	# Wait exits immediately on signals which have traps set. Store return value and wait
 	# again for all jobs to actually complete before continuing.
 	wait $! || RETVAL=$?
@@ -32,4 +32,4 @@ if ! which -- "${1}"; then
 	exit ${RETVAL}
 fi
 
-exec "$@"
+# exec "$@"
