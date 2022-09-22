@@ -5,7 +5,7 @@ const betterSqlite = require('better-sqlite3');
 const mercator = new (require('@mapbox/sphericalmercator'))();
 const zlib = require('zlib');
 const path = require('path');
-const config = require('/data/config.json');
+const config = require('./config.json');
 
 const limit = 1000;
 const tileSize = 256,
