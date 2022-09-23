@@ -2,10 +2,10 @@ const fs = require('fs');
 const mbgl = require('@mapbox/mapbox-gl-native');
 const sharp = require('sharp');
 const betterSqlite = require('better-sqlite3');
-const mercator = new (require('@mapbox/sphericalmercator'))();
 const zlib = require('zlib');
 const path = require('path');
 const config = require('/data/config.json');
+const logPath = '/data/log.txt';
 
 const limit = 1000;
 const tileSize = 256,
@@ -77,8 +77,7 @@ let connectDb = function(dbPath) {
 }
 
 let parseMetadata = function(metadataPath) {
-    let mtPath = path.resolve(metadataPath, 'metadata.json');
-    const fileBuff = fs.readFileSync(mtPath);
+    const fileBuff = fs.readFileSync(metadataPath);
     let metadata = JSON.parse(fileBuff);
     metadata.json = JSON.stringify(JSON.parse(metadata.json));
     return Object.keys(metadata).map(key => {
@@ -187,61 +186,85 @@ function isOverBound(inputPath, z, x, y, args) {
     return isOverBound
 }
 
+function getFilelist(inputPath) {
+    let sqliteQueue = [];
+    const loopThroughtDir = (inputPath) => {
+        const filelist = fs.readdirSync(inputPath);
+        for (let file of filelist) {
+            if (fs.lstatSync(path.resolve(inputPath, file)).isDirectory()) {
+                loopThroughtDir(path.resolve(inputPath, file));
+            } else {
+                if (file.endsWith('.sqlite')) {
+                    sqliteQueue.push(path.resolve(inputPath, file));
+                }
+            }
+        }
+    };
+    loopThroughtDir(inputPath);
+    return sqliteQueue;
+}
+
 let readMbtiles = async function() {
     const args = config; 
     console.log('args:', args);
-    inputPath = args['inputPath'];
-    metadataPath = args['metadataPath'];
-    if (!fs.existsSync(inputPath) || !fs.existsSync(metadataPath)) {
-        let notExistsPath = !fs.existsSync(inputPath) ? inputPath : metadataPath
-        throw Error(`path ${notExistsPath} not existed!`, notExistsPath);
-    }
-    outputPath = args['outputPath'] ? args['outputPath'] : path.basename(inputPath, '.sqlite') + '_webp' + '.mbtiles';
-    console.log('outputPath:', outputPath);
-    if (fs.existsSync(outputPath)) {
-        fs.unlinkSync(outputPath);
-    }
-    const inputDb = connectDb(inputPath);
-    const outputDb = await createDb(metadataPath, outputPath);
-    const startTime = Date.now();
-    const count = inputDb.prepare(`SELECT count(*) from tiles;`).pluck().get();
-    const pageCount = Math.ceil(count/limit);
-    console.log('Total count', count, ', page count', pageCount, ', page limit', limit);
-    let currCount = 0;
-    let overBoundCount = 0;
-    for (let i = 0; i < pageCount; i++) {
-        const offset = i * limit;
-        const data = inputDb.prepare(`SELECT * from tiles limit ${limit} offset ${offset};`).all();
-        console.log('progress: ', offset, '-', offset + data.length);
-        let res = [];
-        for (let item of data) {
-            let z = item.zoom_level, x = item.tile_column, y = item.tile_row, tile_data = item.tile_data;
-            if (isOverBound(inputPath, z, x, y)) {
-                overBoundCount++;
-                continue;
-            }
-            const tileCenter = calCenter(z, x, y);
-            // console.log('z',z,'x', x, 'y',y, 'topRightCorner',topRightCorner,'tileCenter', tileCenter);
-            // console.log('z',z,'x', x, 'y',y, 'topRightCorner',topRightCorner,'tileCenter', tileCenter[0].toFixed(20), tileCenter[1].toFixed(20));
-            item.tile_data = changeColorAndFormat(z, x, y, tileCenter[0].toFixed(20), tileCenter[1].toFixed(20), tile_data);
-            res.push(item.tile_data);
+    const inputDirPath = args['inputDirPath'];
+    const metadataDirPath = args['metadataDirPath'];
+    const sqliteQueue = getFilelist(inputDirPath);
+    console.log('sqliteQueue:', sqliteQueue);
+    for (let inputPath of sqliteQueue) {
+        let outputPath = path.basename(inputPath, '.sqlite') + '_webp' + '.mbtiles';
+        outputPath = args['outputDirPath'] ? path.resolve(args['outputDirPath'], outputPath) : outputPath;
+        console.log('No.', sqliteQueue.indexOf(inputPath) + 1, 'outputDbPath:', outputPath);
+        if (fs.existsSync(outputPath)) {
+            fs.unlinkSync(outputPath);
         }
-        const insert = outputDb.prepare(`INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (@zoom_level, @tile_column, @tile_row, @tile_data);`);
-        const insertMany = outputDb.transaction(async (ndata) => {
-            for (let item of ndata) {
-                insert.run(item);
-                currCount++
+        const inputDb = connectDb(inputPath);
+        const metadataPath = path.resolve(metadataDirPath, path.basename(inputPath, '.sqlite').split(/[\_]/).find(p => p.startsWith('sea2')), 'metadata.json');
+        if (!fs.existsSync(metadataPath)) {
+            throw Error(`path ${metadataPath} not existed!`, metadataPath);
+        }
+        const outputDb = await createDb(metadataPath, outputPath);
+        const startTime = Date.now();
+        const count = inputDb.prepare(`SELECT count(*) from tiles;`).pluck().get();
+        const pageCount = Math.ceil(count/limit);
+        console.log('Total count', count, ', page count', pageCount, ', page limit', limit);
+        let currCount = 0;
+        let overBoundCount = 0;
+        for (let i = 0; i < pageCount; i++) {
+            const offset = i * limit;
+            const data = inputDb.prepare(`SELECT * from tiles limit ${limit} offset ${offset};`).all();
+            console.log('progress: ', offset, '-', offset + data.length);
+            let res = [];
+            for (let item of data) {
+                let z = item.zoom_level, x = item.tile_column, y = item.tile_row, tile_data = item.tile_data;
+                if (isOverBound(inputPath, z, x, y)) {
+                    overBoundCount++;
+                    continue;
+                }
+                const tileCenter = calCenter(z, x, y);
+                // console.log('z',z,'x', x, 'y',y, 'topRightCorner',topRightCorner,'tileCenter', tileCenter);
+                // console.log('z',z,'x', x, 'y',y, 'topRightCorner',topRightCorner,'tileCenter', tileCenter[0].toFixed(20), tileCenter[1].toFixed(20));
+                item.tile_data = changeColorAndFormat(z, x, y, tileCenter[0].toFixed(20), tileCenter[1].toFixed(20), tile_data);
+                res.push(item.tile_data);
             }
-        });
-        const readyData = await Promise.all(res);
-        await insertMany(readyData);
-        console.log('Insert count:', currCount, ', overBoundCount:', overBoundCount);
+            const insert = outputDb.prepare(`INSERT INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (@zoom_level, @tile_column, @tile_row, @tile_data);`);
+            const insertMany = outputDb.transaction(async (ndata) => {
+                for (let item of ndata) {
+                    insert.run(item);
+                    currCount++
+                }
+            });
+            const readyData = await Promise.all(res);
+            await insertMany(readyData);
+            console.log('Insert count:', currCount, ', overBoundCount:', overBoundCount);
+        }
+        console.log('Total count', count, ', insert count:', currCount, ', overBoundCount:', overBoundCount, 'insert count + overBoundCount: ', currCount + overBoundCount);
+        console.log('Create index ...');
+        createIndex(outputPath);
+        console.log('Create index finished!');
+        console.log('Finshed! Total time cost:', (Date.now() - startTime) / 1000 / 60);
+        fs.appendFileSync(logPath, 'No. ' + (sqliteQueue.indexOf(inputPath) + 1) + ' '+ new Date().toLocaleString() + ' ' + outputPath + '\n');
     }
-    console.log('Total count', count, ', insert count:', currCount, ', overBoundCount:', overBoundCount, 'insert count + overBoundCount: ', currCount + overBoundCount);
-    console.log('Create index ...');
-    createIndex(outputPath);
-    console.log('Create index finished!');
-    console.log('Finshed! Total time cost:', (Date.now() - startTime) / 1000 / 60);
 }
 
 readMbtiles()
