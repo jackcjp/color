@@ -1,4 +1,4 @@
 {
-    "inputPath":"/data/sea2-6-1_10.sqlite",
-    "metadataPath":"/data"
+    "inputDirPath":"/data",
+    "metadataDirPath":"/data"
 }
