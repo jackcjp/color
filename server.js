@@ -60,7 +60,7 @@ let changeColorAndFormat = function(zoom, x, y, lon, lat, tileData) {
                         channels: 4
                     }
                 });
-                return image.resize(tileSize, tileSize).toFormat(sharp.format.webp).toBuffer()
+                return image.resize(tileSize, tileSize).toFormat(sharp.format.png).toBuffer()
                 .then(data => { resolve({'zoom_level':zoom, 'tile_column':x ,'tile_row':y, 'tile_data': data}) })
                 .catch( err => { 
                     console.err(err);
@@ -212,7 +212,7 @@ let readMbtiles = async function() {
     const sqliteQueue = getFilelist(inputDirPath);
     console.log('sqliteQueue:', sqliteQueue);
     for (let inputPath of sqliteQueue) {
-        let outputPath = path.basename(inputPath, '.sqlite') + '_webp' + '.mbtiles';
+        let outputPath = path.basename(inputPath, '.sqlite') + '_png' + '.mbtiles';
         outputPath = args['outputDirPath'] ? path.resolve(args['outputDirPath'], outputPath) : outputPath;
         console.log('No.', sqliteQueue.indexOf(inputPath) + 1, 'outputDbPath:', outputPath);
         if (fs.existsSync(outputPath)) {
@@ -272,6 +272,6 @@ readMbtiles()
 // run script local, recommand use docker envrionment
 // sudo apt-get update && sudo apt-get install xvfb && npm install
 // EGL_LOG_LEVEL=debug
-// output: /input/db/path_webp.mbtiles located at the same path
+// output: /input/db/path_png.mbtiles located at the same path
 // xvfb-run -a -s '-screen 0 800x600x24' node server.js /input/db/path
 // e.g.: xvfb-run -a -s '-screen 0 800x600x24' node server.js ./2-6-1.mbtiles

@@ -18,7 +18,7 @@
       "svc": {
         "type": "raster",
         "tiles": [
-          "https://tiles.geovis.online/base/v1/img/{z}/{x}/{y}?tmsIds=c&format=webp&token=67f32bf81e370ccedd560baf089a50175b545b90ff087edb8c1e6f2a2e4dfa0c"
+          "https://tiles.geovis.online/base/v1/img/{z}/{x}/{y}?tmsIds=c&format=png&token=67f32bf81e370ccedd560baf089a50175b545b90ff087edb8c1e6f2a2e4dfa0c"
         ],
         "minzoom": 0,
         "maxzoom": 14
